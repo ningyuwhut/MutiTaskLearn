@@ -61,6 +61,11 @@ padded_shape_dict = {'109_14': 1001, '110_14': 1001, '127_14': 1001, '150_14': 3
 
 #40362692,0,0,216:9342395:1.0 301:9351665:1.0 205:7702673:1.0 206:8317829:1.0 207:8967741:1.0 508:9356012:2.30259 210:9059239:1.0 210:9042796:1.0 210:9076972:1.0 210:9103884:1.0 210:9063064:1.0 127_14:3529789:2.3979 127_14:3806412:2.70805
 
+# 生成序列特征
+# seq_fea_field: 序列特征对应的field名称
+# feat_id_map: 存储特征field和特征id的map
+# feat_val_map: 存储特征field和特征val的map
+# padded_shape_dict 存储特征的最长长度的map
 def gen_seq_fea(seq_fea_field, feat_id_map, feat_val_map):
     max_seq_len = padded_shape_dict[seq_fea_field]
     ad_seq_feat = [0] * max_seq_len
@@ -72,21 +77,36 @@ def gen_seq_fea(seq_fea_field, feat_id_map, feat_val_map):
         ad_seq_feat = np.array(ad_seq_feat, dtype=np.int)
         ad_seq_feat_val[0 : actual_seq_len] = feat_val_map[seq_fea_field][:]
         ad_seq_feat_val = np.array(ad_seq_feat_val, dtype=np.float32)
-        
+
         ad_seq_len_feat = [actual_seq_len]
         ad_seq_len_feat = np.array(ad_seq_len_feat, dtype=np.int)
     else:
         ad_seq_feat = np.array(ad_seq_feat, dtype=np.int)
         ad_seq_feat_val = np.array(ad_seq_feat_val, dtype=np.float32)
         ad_seq_len_feat = np.array(ad_seq_len_feat, dtype=np.int)
-        
-    # print("ad_seq_feat")
-    # print(ad_seq_feat)
-    # print("ad_seq_feat_val")
-    # print(ad_seq_feat_val)
-    # print("ad_seq_len_feat")
-    # print(ad_seq_len_feat)
+
     return ad_seq_feat, ad_seq_feat_val, ad_seq_len_feat
+
+def gen_seq_fea_no_padding(seq_fea_field, feat_id_map, feat_val_map):
+    # max_seq_len = padded_shape_dict[seq_fea_field]
+    ad_seq_feat = [0]
+    ad_seq_feat_val = [0.0]
+    # ad_seq_len_feat = [0]
+    if seq_fea_field in feat_id_map:
+        actual_seq_len = len(feat_id_map[seq_fea_field])
+        ad_seq_feat = feat_id_map[seq_fea_field][:]
+        ad_seq_feat = np.array(ad_seq_feat, dtype=np.int)
+        ad_seq_feat_val = feat_val_map[seq_fea_field][:]
+        ad_seq_feat_val = np.array(ad_seq_feat_val, dtype=np.float32)
+
+        # ad_seq_len_feat = [actual_seq_len]
+        # ad_seq_len_feat = np.array(ad_seq_len_feat, dtype=np.int)
+    else:
+        ad_seq_feat = np.array(ad_seq_feat, dtype=np.int)
+        ad_seq_feat_val = np.array(ad_seq_feat_val, dtype=np.float32)
+        # ad_seq_len_feat = np.array(ad_seq_len_feat, dtype=np.int)
+
+    return ad_seq_feat, ad_seq_feat_val, []
 
 def gen_tfrecords(in_file):
     basename = os.path.basename(in_file) + ".tfrecord"
@@ -100,7 +120,7 @@ def gen_tfrecords(in_file):
     # print(parquet_file.schema)
     for batch in parquet_file.iter_batches(batch_size = 1000):
         # print(type(batch))
-        batch = batch.to_pandas() 
+        batch = batch.to_pandas()
         # print(type(batch))
         # print(batch.info(verbose = True))
         # print("eereee")
@@ -134,7 +154,6 @@ def gen_tfrecords(in_file):
                     feat_val_map[field] = [feat_val]
                     # print("Here")
                     # print(field, feat_id_map[field])
-            
 
             fea_str = row['fea_str']
             for fstr in fea_str.split('\x01'):
@@ -164,26 +183,26 @@ def gen_tfrecords(in_file):
             user_shop_seq_field = "110_14"
             user_brand_seq_field = "127_14"
             user_intention_seq_field = "150_14"
-            user_cat_seq_feat, user_cat_seq_feat_val, user_cat_seq_len_feat = gen_seq_fea(user_cat_seq_field, feat_id_map, feat_val_map)
-            user_shop_seq_feat, user_shop_seq_feat_val, user_shop_seq_len_feat = gen_seq_fea(user_shop_seq_field, feat_id_map, feat_val_map)
-            user_brand_seq_feat, user_brand_seq_feat_val, user_brand_seq_len_feat = gen_seq_fea(user_brand_seq_field, feat_id_map, feat_val_map)
-            user_intention_seq_feat, user_intention_seq_feat_val, user_intention_seq_len_feat = gen_seq_fea(user_intention_seq_field, feat_id_map, feat_val_map)
+            user_cat_seq_feat, user_cat_seq_feat_val, user_cat_seq_len_feat = gen_seq_fea_no_padding(user_cat_seq_field, feat_id_map, feat_val_map)
+            user_shop_seq_feat, user_shop_seq_feat_val, user_shop_seq_len_feat = gen_seq_fea_no_padding(user_shop_seq_field, feat_id_map, feat_val_map)
+            user_brand_seq_feat, user_brand_seq_feat_val, user_brand_seq_len_feat = gen_seq_fea_no_padding(user_brand_seq_field, feat_id_map, feat_val_map)
+            user_intention_seq_feat, user_intention_seq_feat_val, user_intention_seq_len_feat = gen_seq_fea_no_padding(user_intention_seq_field, feat_id_map, feat_val_map)
             feature.update({"u_c_f": tf.train.Feature(int64_list=tf.train.Int64List(value=user_cat_seq_feat)),
-                            "u_c_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_cat_seq_feat_val)),
-                            "u_c_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_cat_seq_len_feat))})
+                            "u_c_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_cat_seq_feat_val))})
+                            # "u_c_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_cat_seq_len_feat))})
 
             feature.update({"u_s_f": tf.train.Feature(int64_list=tf.train.Int64List(value=user_shop_seq_feat)),
-                            "u_s_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_shop_seq_feat_val)),
-                            "u_s_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_shop_seq_len_feat))})
+                            "u_s_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_shop_seq_feat_val))})
+                            # "u_s_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_shop_seq_len_feat))})
 
             feature.update({"u_b_f": tf.train.Feature(int64_list=tf.train.Int64List(value=user_brand_seq_feat)),
-                            "u_b_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_brand_seq_feat_val)),
-                            "u_b_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_brand_seq_len_feat))})
+                            "u_b_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_brand_seq_feat_val))})
+                            # "u_b_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_brand_seq_len_feat))})
 
             feature.update({"u_i_f": tf.train.Feature(int64_list=tf.train.Int64List(value=user_intention_seq_feat)),
-                            "u_i_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_intention_seq_feat_val)),
-                            "u_i_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_intention_seq_len_feat))})
-            
+                            "u_i_fv": tf.train.Feature(float_list=tf.train.FloatList(value=user_intention_seq_feat_val))})
+                            # "u_i_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=user_intention_seq_len_feat))})
+
             # 广告特征
             ad_feat = [0] * len(AD_Fields)
             for field, fea_index in AD_Fields.items():
@@ -192,15 +211,16 @@ def gen_tfrecords(in_file):
                     ad_feat[fea_index - 1] = feat_id_map[field][0]
             ad_feat = np.array(ad_feat, dtype=np.int)
             # print("ad_feat")
-            # print(ad_feat)
+            print(ad_feat)
+            print(np.shape(ad_feat))
             feature.update({"a_f": tf.train.Feature(int64_list=tf.train.Int64List(value=ad_feat))})
 
             # 序列特征该咋处理
             # 应该先初始化为成固定长度，然后填充有值的那部分, 同时，记录这个序列的长度
             ad_seq_field = '210'
-            ad_seq_feat, _, ad_seq_len_feat = gen_seq_fea(ad_seq_field, feat_id_map, feat_val_map)
-            feature.update({"a_i_f": tf.train.Feature(int64_list=tf.train.Int64List(value=ad_seq_feat)),
-                            "a_i_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=ad_seq_len_feat))})
+            ad_seq_feat, _, ad_seq_len_feat = gen_seq_fea_no_padding(ad_seq_field, feat_id_map, feat_val_map)
+            feature.update({"a_i_f": tf.train.Feature(int64_list=tf.train.Int64List(value=ad_seq_feat))})
+                            # "a_i_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=ad_seq_len_feat))})
 
             cross_feat = [0.0] * len(CROSS_Fields)
             for field, fea_index in CROSS_Fields.items():
@@ -211,10 +231,10 @@ def gen_tfrecords(in_file):
             feature.update({"k_f": tf.train.Feature(float_list=tf.train.FloatList(value=cross_feat))})
 
             cross_seq_field = '853'
-            cross_seq_feat, cross_seq_fea_val, cross_seq_len_feat = gen_seq_fea(cross_seq_field, feat_id_map, feat_val_map)
+            cross_seq_feat, cross_seq_fea_val, cross_seq_len_feat = gen_seq_fea_no_padding(cross_seq_field, feat_id_map, feat_val_map)
             feature.update({"k_seq_f": tf.train.Feature(int64_list=tf.train.Int64List(value=cross_seq_feat)),
-                            "k_seq_fv": tf.train.Feature(float_list=tf.train.FloatList(value=cross_seq_fea_val)),
-                            "k_seq_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=cross_seq_len_feat))})
+                            "k_seq_fv": tf.train.Feature(float_list=tf.train.FloatList(value=cross_seq_fea_val))})
+                            # "k_seq_f_len": tf.train.Feature(int64_list=tf.train.Int64List(value=cross_seq_len_feat))})
 
             context_feat = [0] * len(CONTEXT_Fields)
             for field, fea_index in CONTEXT_Fields.items():
@@ -228,10 +248,10 @@ def gen_tfrecords(in_file):
             serialized = example.SerializeToString()
             tfrecord_out.write(serialized)
             num_lines += 1
-            if num_lines % 10000 == 0:
-                print("Process %d" % num_lines)
-                break
         print("Process %d" % num_lines)
+        if num_lines % 10000 == 0:
+            print("Process %d" % num_lines)
+            break
         # break
     tfrecord_out.close()
 
