@@ -4,6 +4,7 @@ import tensorflow as tf
 from tensorflow.keras.layers import Layer, Embedding, Dense, Dropout
 from tensorflow.keras import Model
 from mctr.modeling.din import DeepInterestNet
+from mctr.modeling.my_mmoe import MyMMOE
 from mctr.data.ali_ccp_dataset_to_tfrecord import *
 
 class CustomModel(Model):
@@ -11,7 +12,14 @@ class CustomModel(Model):
                feature_dim,
                embed_dim,
                fc_dims,
-               dropout):
+               dropout,
+               expert_num,
+               task_num,
+               expert_hidden_layers, 
+               gate_hidden_layers,
+               expert_activation,
+               gate_activation
+              ):
     super(CustomModel, self).__init__()
     self.embedding = Embedding(feature_dim + 1, embed_dim)
     self.din_for_category_seq = DeepInterestNet(feature_dim, embed_dim, fc_dims, dropout, self.embedding) #(seq_fea, target_ad_fea)
@@ -19,11 +27,15 @@ class CustomModel(Model):
     self.din_for_brand_seq = DeepInterestNet(feature_dim, embed_dim, fc_dims, dropout, self.embedding) #(seq_fea, target_ad_fea)
     self.din_for_intention_seq = DeepInterestNet(feature_dim, embed_dim, fc_dims, dropout, self.embedding) #(seq_fea, target_ad_fea)
 
+    # ctr 、 cvr 塔各两层网络
     self.dense1 = Dense(64, activation='relu')
     self.dense2 = Dense(1, activation='sigmoid')
 
     self.dense3 =  Dense(64, activation='relu')
     self.dense4 =  Dense(1, activation='sigmoid')
+
+    self.mmoe_layer = MyMMOE(expert_num, task_num, expert_hidden_layers, 
+              gate_hidden_layers, expert_activation, gate_activation)
 
   def call(self, inputs):
     user_cate_seq = inputs['u_c_f']
@@ -95,12 +107,15 @@ class CustomModel(Model):
 #, weighted_intent_seq_fea
     # embed_concat = weighted_cate_seq_fea
     print("embed_concat: ", embed_concat)
-    x = self.dense1(embed_concat)
+
+    mmoe_output = self.mmoe_layer(embed_concat)
+
+    x = self.dense1(mmoe_output)
     print("x:", x)
     ctr_outputs = self.dense2(x)
     print("ctr_outputs:", ctr_outputs)
 
-    x_1 = self.dense3(embed_concat)
+    x_1 = self.dense3(mmoe_output)
     cvr_outputs = self.dense4(x_1) #条件概率，表示在发生点击的条件下发生转化的概率
 
     ctcvr_outputs = ctr_outputs * cvr_outputs
