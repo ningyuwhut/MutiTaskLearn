@@ -1,5 +1,3 @@
-
-# from ali_ccp_dataset_to_tfrecord import *
 from absl import app
 from absl import flags
 from absl import logging
@@ -13,6 +11,8 @@ sys.path.append(__dir__)
 sys.path.append(os.path.abspath(os.path.join(__dir__, '..')))
 
 from mctr.data.ali_ccp_dataset_to_tfrecord import *
+from mctr.modeling.custom_model import CustomModel
+from tensorflow.keras.losses import binary_crossentropy
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("tfrecord_input_dir", ALI_CCP_DATASET_DIR + "/" + "tfrecord", "input dir")
@@ -31,90 +31,59 @@ feature_proto = {
     'u_i_f':  tf.io.VarLenFeature(tf.int64),
     "u_i_fv": tf.io.VarLenFeature(tf.float32),
     "a_f": tf.io.FixedLenFeature([4], tf.int64),
-    "a_i_f": tf.io.VarLenFeature( tf.int64),
+    "a_i_f": tf.io.VarLenFeature(tf.int64),
     "k_f": tf.io.FixedLenFeature([3], tf.float32),
     "k_seq_f": tf.io.VarLenFeature(tf.int64),
     "k_seq_fv": tf.io.VarLenFeature(tf.float32),
     "c_f": tf.io.FixedLenFeature([1], tf.int64)
 }
 
-
 # Parse features, using the above template.
 def parse_record(record):
     parsed_example = tf.io.parse_single_example(record, features=feature_proto)
+#`tf.io.VarLenFeature` 返回的是一个 `tf.SparseTensor` 对象，由于后面需要对序列特征进行
+#padding操作，而pad函数只支持稠密张量，所以这里使用tf.sparse.to_dense将其转化为稠密张量
     features = {
         'u_f': parsed_example['u_f'],
-        'u_c_f': parsed_example['u_c_f'],
-        "u_c_fv": parsed_example['u_c_fv'],
-        'u_s_f': parsed_example['u_s_f'],
-        "u_s_fv": parsed_example['u_s_fv'],
-        'u_b_f':  parsed_example['u_b_f'],
-        "u_b_fv": parsed_example['u_b_fv'],
-        'u_i_f':  parsed_example['u_i_f'],
-        "u_i_fv": parsed_example['u_i_fv'],
+        'u_c_f': tf.sparse.to_dense(parsed_example['u_c_f']), # 商品类目ID序列
+        "u_c_fv": tf.sparse.to_dense(parsed_example['u_c_fv']), # 商品类目id序列权重
+
+        'u_s_f': tf.sparse.to_dense(parsed_example['u_s_f']), # 商品店铺ID序列
+        "u_s_fv": tf.sparse.to_dense(parsed_example['u_s_fv']), # 商品店铺ID序列权重
+
+        'u_b_f': tf.sparse.to_dense(parsed_example['u_b_f']), # 商品品牌ID序列
+        "u_b_fv": tf.sparse.to_dense(parsed_example['u_b_fv']), # 商品品牌ID序列权重
+
+        'u_i_f': tf.sparse.to_dense(parsed_example['u_i_f']), # 商品意图ID序列
+        "u_i_fv": tf.sparse.to_dense(parsed_example['u_i_fv']), # 商品意图ID序列权重
+
         "a_f": parsed_example['a_f'],
-        "a_i_f": parsed_example['a_i_f'],
+        "a_i_f":  tf.sparse.to_dense(parsed_example['a_i_f']), # 商品关联用户意图ID
         "k_f": parsed_example['k_f'],
-        "k_seq_f": parsed_example['k_seq_f'],
-        "k_seq_fv": parsed_example['k_seq_fv'],
+        "k_seq_f": tf.sparse.to_dense(parsed_example['k_seq_f']), # 用户意图ID序列和商品关联用户意图ID组合特征
+        "k_seq_fv": tf.sparse.to_dense(parsed_example['k_seq_fv']),
         "c_f": parsed_example['c_f']
     }
+
     y_label = parsed_example['y']
+    print("y_label", y_label.shape)
     z_label = parsed_example['z']
-    return features, y_label, z_label
+    labels = {"y": y_label, "z": z_label}
+    #return features, labels
+    return features, [y_label, z_label]
 # Apply the parsing to each record from the dataset.
 
-# Load TFRecord data.
-def create_dataset(data):
-  # ys = tf.one_hot(ys, depth=n_classes)
-  # return tf.data.Dataset.from_tensor_slices((xs, ys)) \
-  #   .map(preprocess) \
-  #   .shuffle(len(ys)) \
-  #   .batch(128)
+def create_dataset(data, padded_shapes, padded_value, batch_size = 1000):
   data = data.map(parse_record)
   # Refill data indefinitely.
   data = data.repeat()
   # Shuffle data.
   data = data.shuffle(buffer_size=1000)
   # Batch data (aggregate records together).
-  data = data.batch(batch_size=256)
+  data = data.padded_batch(batch_size=batch_size, padded_shapes=padded_shapes)
   # Prefetch batch (pre-load batch for faster consumption).
   data = data.prefetch(buffer_size=1)
   return data
-
-# ====================================
-# # Define the input data shape
-# feature_description = {
-#     'feature1': tf.io.FixedLenFeature([], tf.float32),
-#     'feature2': tf.io.FixedLenFeature([], tf.int64),
-#     'label': tf.io.FixedLenFeature([], tf.int64),
-# }
-# # Define a function to parse each example in the TFRecord dataset
-# def _parse_function(example_proto):
-#     parsed_example = tf.io.parse_single_example(example_proto, feature_description)
-#     features = {
-#         'feature1': parsed_example['feature1'],
-#         'feature2': parsed_example['feature2']
-#     }
-#     label = parsed_example['label']
-#     return features, label
-# # Load the TFRecord dataset
-# dataset = tf.data.TFRecordDataset('data.tfrecord').map(_parse_function)
-# Define the DNN model
-# model = tf.keras.Sequential([
-#     tf.keras.layers.Dense(64, activation='relu', input_shape=(2,)),
-#     tf.keras.layers.Dense(64, activation='relu'),
-#     tf.keras.layers.Dense(1, activation='sigmoid')
-# ])
-# # Compile the model
-# model.compile(optimizer='adam',
-#               loss=tf.keras.losses.BinaryCrossentropy(),
-#               metrics=['accuracy'])
-# # Train the model
-# model.fit(dataset.repeat(), epochs=10)
-# # Evaluate the model
-# loss, accuracy = model.evaluate(dataset.batch(32))
-# print('Loss: {}, Accuracy: {}'.format(loss, accuracy))
 
 # 参考：
 # https://towardsdatascience.com/building-your-first-neural-network-in-tensorflow-2-tensorflow-for-hackers-part-i-e1e2f1dfe7a0
@@ -122,26 +91,124 @@ def create_dataset(data):
 # https://github.com/Prayforhanluo/CTR_Algorithm/tree/main/tensorflow2.0
 # https://github.com/linbang/DIN
 
+def binary_crossentropy_cvr(y_true, y_pred, from_logits=False):
+    y_ctr_true = y_true[:, 1]
+    # y_cvr_true = y_true[:, 0:1]
+    indices = tf.equal(y_ctr_true, 1)
+
+    y_cvr_pred = y_pred[indices]
+    y_cvr_true = y_cvr_true[indices]
+
+    loss= binary_crossentropy(y_cvr_true, y_cvr_pred, from_logits=from_logits)
+    return loss
+
+def loss_func(y_true, y_pred):
+    print("y_true:", y_true)
+    print("y_pred:", y_pred)
+    # y_label = y_true['y']
+    # z_label = y_true['z']
+    click_label = y_true[0]
+    conv_label = y_true[1]
+
+    ctr_loss= binary_crossentropy(click_label, y_pred[0])
+    ctcvr_loss= binary_crossentropy(conv_label, y_pred[1])
+    loss = ctr_loss + ctcvr_loss
+    return loss
+
 def main(_):
     filenames = [FLAGS.tfrecord_input_dir + "/sample_skeleton_train_processed.parquet.tfrecord"]
     data = tf.data.TFRecordDataset(filenames)
-    dataset = create_dataset(data)
+    padded_shapes = (
+        {
+        'u_f' : [len(USER_Fields)],
+        'u_c_f' : [None],
+        'u_c_fv' : [None],
 
-    for record in dataset.take(1):
-        print (type(record))
-        feature = record[0]
-        y = record[1]
-        z = record[2]
-        a_f = feature['a_f']
-        print(tf.shape(y))
-        # print(y.numpy())
-        print(tf.shape(a_f))
-        # print(feature)
-        print("k_seq_f")
-        print(feature['k_seq_f'])
+        'u_s_f' : [None],
+        'u_s_fv' : [None],
 
-        # print(record['y'].numpy())
-        # print(record['z'].numpy())
+        'u_b_f' : [None],
+        'u_b_fv' : [None],
+
+        'u_i_f' : [None],
+        'u_i_fv' : [None],
+
+        'a_f' : [4],
+
+        'a_i_f' : [None],
+        'k_f' : [len(CROSS_Fields)],
+        'k_seq_f': [None],
+        'k_seq_fv': [None],
+        'c_f': [len(CONTEXT_Fields)]
+        }, 
+        # {
+        # 'y': [1],
+        # 'z': [1]
+        # }
+        [2, 1]
+        )
+    padded_value = (
+        {
+        'u_f' : 0,
+        'u_c_f' : list(USER_CAT_SEQ_Fields.values())[0],
+        'u_c_fv' : 0.0,
+
+        'u_s_f' : list(USER_SHOP_SEQ_Fields.values())[0],
+        'u_s_fv' : 0.0,
+
+        'u_b_f' : list(USER_BRAND_SEQ_Fields.values())[0],
+        'u_b_fv' : 0.0,
+
+        'u_i_f' : list(USER_INTENTION_SEQ_Fields.values())[0],
+        'u_i_fv' : 0.0,
+
+        'a_f' : 0,
+
+        'a_i_f' : list(AD_SEQ_Fields.values())[0],
+        'k_f' : 0,
+        'k_seq_f': list(CROSS_SEQ_Fields.values())[0],
+        'k_seq_fv': 0.0,
+        'c_f': 0
+        }, 
+        # {
+        # 'y': 0,
+        # 'z': 0 
+        # }
+        0
+        )
+
+    dataset = create_dataset(data, padded_shapes, padded_value)
+    print("dataset", dataset)
+    # 使用一个共用的embedding table, 每个特征各自有一个全局编码的默认值
+    feature_dim, embed_dim, fc_dims, dropout = 10000000, 8, [128, 256], 0.5
+    customModel = CustomModel(feature_dim, embed_dim, fc_dims, dropout)
+    customModel.compile(optimizer='adam',
+              loss=loss_func,
+              metrics=['accuracy'])
+    customModel.fit(dataset, epochs=5, steps_per_epoch=100)
+
+    # i = 0
+    # for record in dataset.take(100):
+    #     print (type(record))
+    #     feature = record[0]
+    #     y = record[1]
+    #     # z = record[2]
+    #     a_f = feature['a_f']
+    #     print(tf.shape(y))
+    #     # print(y.numpy())
+    #     print(tf.shape(a_f))
+    #     # print(feature)
+    #     i += 1
+    #     print("u_s_f")
+    #     print(i)
+    #     print(feature['u_s_f'])
+
+    #     print(feature['u_s_f'].shape)
+    #     for i in range(feature['u_s_f'].shape[0]):
+    #         print(i, len(feature['u_s_f'][i].numpy()), feature['u_s_f'][i].numpy())
+
+    #     # print(record['y'].numpy())
+    #     # print(record['z'].numpy())
         # print(record['fare'].numpy())
 
 if __name__ == "__main__":
